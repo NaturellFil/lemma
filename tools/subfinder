@@ -1,0 +1,15 @@
+#!/bin/bash
+# subfinder — passive subdomain enum. Read-only FS => HOME/config to /tmp.
+# If LEMMA_SUBFINDER_CONFIG is set, the provider-config (with API keys) is pulled
+# from AWS (SSM/Secrets/S3/env) into subfinder's default config path so more
+# sources are queried. See API-KEYS.md.
+export HOME=/tmp
+export XDG_CONFIG_HOME=/tmp/.config
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+if [ -n "$LEMMA_SUBFINDER_CONFIG" ]; then
+    python3 "$DIR/lib/load-config.py" "$LEMMA_SUBFINDER_CONFIG" \
+        "/tmp/.config/subfinder/provider-config.yaml" 2>/dev/null || true
+fi
+
+exec "$DIR/bin/subfinder" "$@"

@@ -39,7 +39,8 @@ While the intented use case for Lemma is to run verbose security security toolin
 This fork adds **container-image packaging** so the Lambda is no longer bound by the
 250 MB unzipped zip cap — it gets the **10 GB** container limit instead. That makes
 room to bake in the entire Bug Hunter's Methodology (Jhaddix) recon toolchain plus
-nuclei-templates, DNS resolvers, gf-patterns and curated wordlists.
+DNS resolvers, gf-patterns and curated wordlists. (nuclei-templates are fetched to
+`/tmp` at runtime rather than baked, to keep the image small.)
 
 - **Build:** `./build.sh` now asks for *packaging* — choose **container** (default).
   Tools are built/baked at image build time, not stuffed into a zip. The host docker
@@ -48,8 +49,11 @@ nuclei-templates, DNS resolvers, gf-patterns and curated wordlists.
   tlsx, asnmap, mapcidr, cdncheck, puredns, shuffledns, massdns, dnsx, alterx,
   dnsgen, httpx, httprobe, naabu (connect scan), katana, gau, waybackurls,
   hakrawler, gospider, subjs, ffuf, feroxbuster, arjun, paramspider, gf (+patterns),
-  qsreplace, nuclei (+templates), dalfox, smuggler, anew, unfurl, uro,
-  interactsh-client — plus `getwl` for pulling big assetnote/SecLists wordlists.
+  qsreplace, nuclei (templates fetched at runtime), dalfox, smuggler, anew, unfurl,
+  uro, interactsh-client — plus `getwl` for pulling big assetnote/SecLists wordlists.
+- **API keys for coverage:** subfinder/amass/github-subdomains load provider keys at
+  runtime from SSM / Secrets Manager / S3 (never baked into the image). See
+  **[API-KEYS.md](API-KEYS.md)**.
 - **How to run the methodology:** see **[RECON.md](RECON.md)** for a phase-by-phase
   playbook and fan-out patterns.
 - **Notes / limits:** 15-min timeout (chunk via `-p`/`-d` fan-out), unprivileged

@@ -24,6 +24,25 @@ Resources:
           LEMMA_TIMEOUT: %TIMEOUT%
           HOME: /tmp
           PORT: 8000
+          # API-key sources for better recon coverage (see API-KEYS.md).
+          # Set to e.g. ssm:/lemma/subfinder, secret:lemma/amass, s3://bucket/key,
+          # or env:VARNAME. Leave blank to run without keys.
+          LEMMA_SUBFINDER_CONFIG: ""
+          LEMMA_AMASS_CONFIG: ""
+          # github-subdomains token: literal in GITHUB_TOKEN, or a
+          # ssm:/secret:/s3:// source in LEMMA_GITHUB_TOKEN (resolved at runtime).
+          GITHUB_TOKEN: ""
+          LEMMA_GITHUB_TOKEN: ""
+      # Allow reading API-key configs from SSM / Secrets Manager (scoped to a
+      # /lemma/ naming convention). Uncomment S3ReadPolicy and set your bucket if
+      # you store configs in S3 instead.
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: lemma/*
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:lemma/*"
+        # - S3ReadPolicy:
+        #     BucketName: my-lemma-secrets-bucket
       FunctionUrlConfig:
         AuthType: NONE
         InvokeMode: RESPONSE_STREAM

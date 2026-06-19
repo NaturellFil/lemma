@@ -21,6 +21,10 @@ tools_dir="${2:-/var/task/tools}"
 app_dir="${3:-/var/task}"
 gobin="${GOBIN_SRC:-/opt/gobin}"
 
+# boto3 is needed by tools/lib/load-config.py to pull API-key configs from
+# SSM / Secrets Manager / S3 at runtime (see API-KEYS.md).
+printf 'boto3\n' > "$app_dir/tool_requirements.txt"
+
 # Rust/prebuilt versions
 FEROX_VER=2.13.1
 FINDOMAIN_VER=10.0.1
@@ -28,7 +32,6 @@ AMASS_VER=5.1.1
 
 echo "[*] Distributing TBHM tools for arch=$arch into $tools_dir"
 mkdir -p "$tools_dir/bin" "$tools_dir/wordlists"
-: > "$app_dir/tool_requirements.txt"   # smuggler/python tools handled below
 
 dl() { curl -fsSL "$1" -o "$2"; }
 tmp() { mktemp -d; }
@@ -38,12 +41,13 @@ tmp() { mktemp -d; }
 # ----------------------------------------------------------------------------
 # DIRECT: binary invoked straight from tools/<name>
 DIRECT_GO=(
-    subfinder dnsx httpx tlsx asnmap cdncheck mapcidr alterx interactsh-client
+    dnsx httpx tlsx asnmap cdncheck mapcidr alterx interactsh-client
     assetfinder anew unfurl qsreplace httprobe waybackurls hakrawler gospider
-    subjs github-subdomains dalfox massdns
+    subjs dalfox massdns
 )
-# WRAPPED: binary into tools/bin, fronted by a committed wrapper in tools/
-WRAPPED_GO=( nuclei katana puredns shuffledns gf naabu ffuf gau )
+# WRAPPED: binary into tools/bin, fronted by a committed wrapper in tools/.
+# subfinder/github-subdomains are wrapped so they can load API keys at runtime.
+WRAPPED_GO=( nuclei katana puredns shuffledns gf naabu ffuf gau subfinder github-subdomains )
 
 for t in "${DIRECT_GO[@]}"; do
     if [ -f "$gobin/$t" ]; then cp -f "$gobin/$t" "$tools_dir/$t"; else echo "[!] missing go bin: $t"; fi
@@ -84,7 +88,8 @@ else
     dl "https://github.com/owasp-amass/amass/releases/download/v${AMASS_VER}/amass_linux_arm64.tar.gz" "$t/amass.tgz"
 fi
 tar -xzf "$t/amass.tgz" -C "$t"
-mv "$(find "$t" -name amass -type f | head -1)" "$tools_dir/amass" && chmod +x "$tools_dir/amass"
+# amass is wrapped (runtime API-key loading) -> binary into bin/
+mv "$(find "$t" -name amass -type f | head -1)" "$tools_dir/bin/amass" && chmod +x "$tools_dir/bin/amass"
 
 # ----------------------------------------------------------------------------
 # 3) Python tools (console scripts on PATH; thin wrappers committed in tools/)
@@ -96,11 +101,9 @@ pip install --no-cache-dir "git+https://github.com/devanshbatham/paramspider.git
     || echo "[!] paramspider failed to install"
 
 # ----------------------------------------------------------------------------
-# 4) nuclei-templates (baked, read-only)
+# 4) nuclei-templates are NOT baked (saves ~250 MB). The nuclei wrapper
+#    downloads them to /tmp/nuclei-templates on first use per warm instance.
 # ----------------------------------------------------------------------------
-echo "[*] nuclei-templates (shallow clone)"
-git clone --depth 1 https://github.com/projectdiscovery/nuclei-templates "$tools_dir/nuclei-templates" > /dev/null 2>&1
-rm -rf "$tools_dir/nuclei-templates/.git"
 
 # ----------------------------------------------------------------------------
 # 5) gf patterns (for grep-of-interest) -> consumed via GF_PATH (set in Dockerfile)

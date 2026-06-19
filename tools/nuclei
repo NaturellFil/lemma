@@ -1,15 +1,18 @@
 #!/bin/bash
-# nuclei scanner. Read-only FS => state/config/cache go to /tmp.
-# Templates are baked read-only into tools/nuclei-templates; we disable the
-# update check (-duc) so nuclei never tries to write to the read-only template
-# dir. If the caller did not pass their own -t/-templates/-w/-workflows we
-# default to the baked template set.
+# nuclei scanner. Read-only FS => state/config/cache + templates go to /tmp.
+# Templates are NOT baked into the image; we download them to /tmp on first use
+# per warm execution environment, then point -t at that dir. -duc disables the
+# update *check* during scans (the read-only image has no template dir to update).
+#
+# NOTE: on a cold worker the first run downloads ~hundreds of MB of templates.
+# For heavy fan-out, consider caching templates in S3 and syncing to /tmp, or
+# scoping with -t http/<dir> to pull/scan only what you need.
 export HOME=/tmp
 export XDG_CONFIG_HOME=/tmp/.config
 export XDG_CACHE_HOME=/tmp/.cache
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-TEMPLATES="$DIR/nuclei-templates"
+TEMPLATES=/tmp/nuclei-templates
 
 have_templates=0
 for a in "$@"; do
@@ -17,6 +20,12 @@ for a in "$@"; do
         -t|-templates|-w|-workflows|-tl|-template-list) have_templates=1 ;;
     esac
 done
+
+# Fetch templates once per warm instance if the caller didn't bring their own.
+if [ "$have_templates" -eq 0 ] && { [ ! -d "$TEMPLATES" ] || [ -z "$(ls -A "$TEMPLATES" 2>/dev/null)" ]; }; then
+    echo "[nuclei] downloading templates to $TEMPLATES (first run on this worker)..." >&2
+    "$DIR/bin/nuclei" -update-templates -update-template-dir "$TEMPLATES" >/dev/null 2>&1 || true
+fi
 
 EXTRA=()
 if [ "$have_templates" -eq 0 ] && [ -d "$TEMPLATES" ]; then

@@ -1,0 +1,14 @@
+#!/bin/bash
+# amass — OWASP asset discovery. Read-only FS => HOME/config to /tmp.
+# If LEMMA_AMASS_CONFIG is set, the datasources file (with API keys) is pulled
+# from AWS (SSM/Secrets/S3/env) into amass's default config dir so more sources
+# are queried. amass auto-discovers $HOME/.config/amass/. See API-KEYS.md.
+export HOME=/tmp
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+if [ -n "$LEMMA_AMASS_CONFIG" ]; then
+    python3 "$DIR/lib/load-config.py" "$LEMMA_AMASS_CONFIG" \
+        "/tmp/.config/amass/datasources.yaml" 2>/dev/null || true
+fi
+
+exec "$DIR/bin/amass" "$@"

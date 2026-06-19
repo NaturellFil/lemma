@@ -1,8 +1,9 @@
 # Lemma Lambda — CONTAINER IMAGE packaging (TBHM big-tools edition).
 #
 # A zip-packaged Lambda is capped at 250 MB unzipped, which cannot hold the full
-# Bug Hunter's Methodology (Jhaddix) recon stack + nuclei-templates + wordlists.
-# A container image gets 10 GB, so we bake the whole recon toolchain in.
+# Bug Hunter's Methodology (Jhaddix) recon stack + wordlists. A container image
+# gets 10 GB, so we bake the whole recon toolchain in. (nuclei-templates are
+# fetched to /tmp at runtime by the nuclei wrapper, not baked.)
 #
 # Build strategy:
 #   stage 1 (gobuild) : `go install` the entire Go tool ecosystem + compile massdns

@@ -21,6 +21,8 @@ so you can run the whole methodology from disposable, rotating-IP Lambda workers
   Lambda) and are intentionally not bundled.
 - **Fan-out + `/tmp` don't mix.** A wordlist fetched with `getwl` lives only on the
   one warm instance. For fan-out, use a **baked** wordlist (`tools/wordlists/*`).
+  Same applies to nuclei templates: each cold worker downloads them once (~hundreds
+  of MB). For heavy nuclei fan-out, scope with `-t http/<dir>` or cache in S3.
 
 ## Tool inventory (baked)
 - **Passive subs:** `subfinder`, `amass`, `assetfinder`, `findomain`, `github-subdomains`
@@ -31,10 +33,13 @@ so you can run the whole methodology from disposable, rotating-IP Lambda workers
 - **Crawl:** `katana`, `gau`, `waybackurls`, `hakrawler`, `gospider`
 - **JS / content:** `subjs`, `ffuf`, `feroxbuster`
 - **Params:** `arjun`, `paramspider`, `gf` (+ patterns), `qsreplace`
-- **Vuln:** `nuclei` (+ templates), `dalfox`, `smuggler`
+- **Vuln:** `nuclei` (templates auto-downloaded to `/tmp` on first use), `dalfox`, `smuggler`
 - **Utils:** `anew`, `unfurl`, `uro`, `interactsh-client`, `getwl`
 - **Wordlists:** curated SecLists subset in `tools/wordlists/`; big assetnote/SecLists
   lists on demand via `getwl` (e.g. `getwl an-best-dns`, `getwl dirlist-big`).
+
+> **More coverage:** subfinder, amass and github-subdomains pull API keys at runtime
+> from AWS (SSM/Secrets Manager/S3). Configure once — see **[API-KEYS.md](API-KEYS.md)**.
 
 ---
 
@@ -99,7 +104,7 @@ cat urls.txt | uro | anew urls.clean.txt
 ## 7. JS recon
 ```
 cat urls.clean.txt | subjs                            # pull .js URLs
-cat js.txt | nuclei -t http/exposures -duc            # secrets/exposures (wrapper adds templates)
+cat js.txt | nuclei -t http/exposures                 # secrets/exposures (-t scopes the download)
 ```
 
 ## 8. Parameter discovery
@@ -119,7 +124,7 @@ ffuf -w "$(getwl dirlist-big)" -u https://app.target.com/FUZZ
 
 ## 10. Vuln scanning
 ```
-cat live.txt | nuclei -severity medium,high,critical          # templates auto-loaded, -duc set
+cat live.txt | nuclei -severity medium,high,critical          # templates auto-downloaded on first run, -duc set
 cat params.txt | dalfox pipe
 cat live.txt | smuggler                                       # request smuggling probe
 ```

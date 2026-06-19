@@ -1,0 +1,20 @@
+#!/bin/bash
+# github-subdomains — pull subdomains from GitHub code search. Needs a token.
+# Token resolution order: explicit -t arg > LEMMA_GITHUB_TOKEN (ssm:/secret:/
+# s3://env: scheme, resolved at runtime) > GITHUB_TOKEN (literal). See API-KEYS.md.
+export HOME=/tmp
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+has_t=0
+for a in "$@"; do [ "$a" = "-t" ] && has_t=1; done
+
+TOKEN="$GITHUB_TOKEN"
+if [ -n "$LEMMA_GITHUB_TOKEN" ]; then
+    resolved="$(python3 "$DIR/lib/load-config.py" "$LEMMA_GITHUB_TOKEN" - 2>/dev/null)"
+    [ -n "$resolved" ] && TOKEN="$resolved"
+fi
+
+EXTRA=()
+[ "$has_t" -eq 0 ] && [ -n "$TOKEN" ] && EXTRA=(-t "$TOKEN")
+
+exec "$DIR/bin/github-subdomains" "${EXTRA[@]}" "$@"
