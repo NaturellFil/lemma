@@ -92,13 +92,10 @@ tar -xzf "$t/amass.tgz" -C "$t"
 mv "$(find "$t" -name amass -type f | head -1)" "$tools_dir/bin/amass" && chmod +x "$tools_dir/bin/amass"
 
 # ----------------------------------------------------------------------------
-# 3) Python tools (console scripts on PATH; thin wrappers committed in tools/)
+# 3) Python tools (arjun/dnsgen/uro/paramspider) are pip-installed in the FINAL
+#    image stage (Dockerfile.lambda), since their console scripts must land in
+#    the runtime python environment. The wrappers are committed in tools/.
 # ----------------------------------------------------------------------------
-echo "[*] python tools: arjun dnsgen uro (pypi) + paramspider (git)"
-pip install --no-cache-dir arjun dnsgen uro > /dev/null 2>&1 \
-    || echo "[!] one or more pypi tools failed to install"
-pip install --no-cache-dir "git+https://github.com/devanshbatham/paramspider.git" > /dev/null 2>&1 \
-    || echo "[!] paramspider failed to install"
 
 # ----------------------------------------------------------------------------
 # 4) nuclei-templates are NOT baked (saves ~250 MB). The nuclei wrapper
@@ -140,7 +137,7 @@ declare -A WL=(
   ["raft-large-directories.txt"]="$SL/Discovery/Web-Content/raft-large-directories.txt"
   ["raft-large-files.txt"]="$SL/Discovery/Web-Content/raft-large-files.txt"
   ["raft-large-words.txt"]="$SL/Discovery/Web-Content/raft-large-words.txt"
-  ["directory-list-2.3-medium.txt"]="$SL/Discovery/Web-Content/directory-list-2.3-medium.txt"
+  ["directory-list-2.3-medium.txt"]="$SL/Discovery/Web-Content/DirBuster-2007_directory-list-2.3-medium.txt"
   ["api-endpoints.txt"]="$SL/Discovery/Web-Content/api/api-endpoints.txt"
   ["burp-parameter-names.txt"]="$SL/Discovery/Web-Content/burp-parameter-names.txt"
   ["subdomains-top1m-110k.txt"]="$SL/Discovery/DNS/subdomains-top1million-110000.txt"

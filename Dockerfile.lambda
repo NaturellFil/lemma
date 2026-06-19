@@ -5,27 +5,32 @@
 # gets 10 GB, so we bake the whole recon toolchain in. (nuclei-templates are
 # fetched to /tmp at runtime by the nuclei wrapper, not baked.)
 #
-# Build strategy:
-#   stage 1 (gobuild) : `go install` the entire Go tool ecosystem + compile massdns
-#   stage 2 (final)   : python:slim + Lambda Web Adapter; copy go binaries in,
-#                       add Rust/prebuilt tools, python tools, templates,
-#                       resolvers, gf-patterns and wordlists.
+# Build strategy (3 stages so the final image carries the tools tree exactly
+# once — no duplicated /go/bin layer):
+#   stage 1 (gobuild)  : `go install` the Go tool ecosystem + compile massdns
+#   stage 2 (assemble) : distribute go binaries + download prebuilt/Rust tools,
+#                        wordlists, resolvers, gf-patterns into /build/tools
+#   stage 3 (final)    : python:slim + Lambda Web Adapter; COPY the finished
+#                        tools tree once, then pip-install the app + python tools
 #
-# The AWS Lambda Web Adapter (copied into /opt/extensions) turns the FastAPI
-# response-streaming server into a Lambda handler — no Runtime Interface Client
-# needed; the adapter polls the Lambda Runtime API and proxies to local uvicorn.
+# The AWS Lambda Web Adapter (in /opt/extensions) turns the FastAPI response-
+# streaming server into a Lambda handler — it polls the Runtime API and proxies
+# to local uvicorn; no Runtime Interface Client needed.
 
 # =========================================================================
 # stage 1: build the Go tool ecosystem + massdns
 # =========================================================================
-FROM golang:1.23-bookworm AS gobuild
+FROM golang:1.24-bookworm AS gobuild
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git gcc make libpcap-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# GOTOOLCHAIN=auto lets `go install` fetch a newer toolchain if a tool's go.mod
+# requires one (several PD tools now need >= go 1.24).
 ENV GOFLAGS=-buildvcs=false \
-    GOBIN=/go/bin
+    GOBIN=/go/bin \
+    GOTOOLCHAIN=auto
 
 # Static (CGO-free) tools — PD suite, tomnomnom utils, crawlers, community tools.
 ENV CGO_ENABLED=0
@@ -69,40 +74,54 @@ RUN git clone --depth 1 https://github.com/blechschmidt/massdns /tmp/massdns \
     && cp /tmp/massdns/bin/massdns /go/bin/massdns
 
 # =========================================================================
-# stage 2: final Lambda image
+# stage 2: assemble the final tools tree (intermediate, discarded)
+# =========================================================================
+FROM debian:bookworm-slim AS assemble
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl wget unzip git tar ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG TOOL_ARCH=amd64
+WORKDIR /build
+
+COPY tools/ /build/tools/
+COPY --from=gobuild /go/bin/ /build/gobin/
+
+# Distribute go binaries + download prebuilt tools, wordlists, resolvers,
+# gf-patterns; write tool_requirements.txt (boto3). /build/gobin stays in this
+# throwaway stage and is never copied into the final image.
+RUN GOBIN_SRC=/build/gobin /build/tools/install_tools_container.sh "$TOOL_ARCH" /build/tools /build \
+    && rm -f /build/tools/install_tools.sh /build/tools/install_tools_container.sh
+
+# =========================================================================
+# stage 3: final Lambda image
 # =========================================================================
 FROM public.ecr.aws/docker/library/python:3.12-slim
 
 # Lambda Web Adapter (response streaming bridge)
 COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1 /lambda-adapter /opt/extensions/lambda-adapter
 
+# Runtime deps only: curl (getwl), git (paramspider pip), libpcap (naabu).
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl wget unzip git ca-certificates libpcap0.8 \
+        curl git ca-certificates libpcap0.8 \
     && rm -rf /var/lib/apt/lists/*
-
-# Tool arch: prefer explicit TOOL_ARCH build-arg, fall back to BuildKit TARGETARCH.
-ARG TARGETARCH
-ARG TOOL_ARCH
-ENV TOOL_ARCH=${TOOL_ARCH:-${TARGETARCH:-amd64}}
 
 WORKDIR /var/task
 
-# Go binaries from stage 1 land in a staging dir; the installer distributes them.
-COPY --from=gobuild /go/bin/ /opt/gobin/
+# The finished tools tree — copied exactly once (no duplicated go-bin layer).
+COPY --from=assemble /build/tools /var/task/tools
+COPY --from=assemble /build/tool_requirements.txt /var/task/tool_requirements.txt
 
-# Tool wrappers + installer, then bake everything (binaries distributed, Rust
-# tools + python tools + templates + resolvers + gf-patterns + wordlists added).
-# Also generates tool_requirements.txt at /var/task.
-COPY tools/ /var/task/tools/
-RUN chmod +x /var/task/tools/* 2>/dev/null; \
-    /var/task/tools/install_tools_container.sh "$TOOL_ARCH" /var/task/tools /var/task; \
-    rm -f /var/task/tools/install_tools.sh /var/task/tools/install_tools_container.sh
-
-# Python deps for the FastAPI app (requirements.txt ends with
-# "-r tool_requirements.txt", which now exists).
+# Python deps for the FastAPI app + boto3 (requirements.txt ends with
+# "-r tool_requirements.txt").
 COPY app/requirements.txt /var/task/requirements.txt
 RUN pip install --no-cache-dir -r /var/task/requirements.txt
+
+# Python recon tools (console scripts land in the runtime python env).
+RUN pip install --no-cache-dir arjun dnsgen uro \
+    && pip install --no-cache-dir "git+https://github.com/devanshbatham/paramspider.git"
 
 # App code (main.py, static/, run.sh). Does not clobber tools/.
 COPY app/ /var/task/

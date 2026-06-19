@@ -1,6 +1,13 @@
 #!/bin/bash
-# gf — grep-of-interest. Patterns are baked into tools/gf-patterns; point GF_PATH
-# at them (also set in the Dockerfile, repeated here for direct invocation).
+# gf — grep-of-interest. Patterns are baked into tools/gf-patterns. GF_PATH makes
+# `gf <pattern>` load them (confirmed working). `gf -list` additionally scans the
+# home ~/.gf dir, so we mirror the patterns there (best-effort) for discovery.
+export HOME=/tmp
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 export GF_PATH="${GF_PATH:-$DIR/gf-patterns}"
+
+if [ ! -d "$HOME/.gf" ]; then
+    mkdir -p "$HOME/.gf" 2>/dev/null && cp -n "$DIR/gf-patterns"/*.json "$HOME/.gf/" 2>/dev/null || true
+fi
+
 exec "$DIR/bin/gf" "$@"
