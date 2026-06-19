@@ -1,0 +1,11 @@
+#!/bin/bash
+# katana crawler. The Lambda filesystem is read-only except /tmp, so point all
+# state/config/cache dirs there. NOTE: headless mode (-headless/-hl) needs a
+# chromium binary which is not bundled; standard (non-headless) crawling works.
+export HOME=/tmp
+export XDG_DATA_HOME=/tmp/.local/share
+export XDG_CONFIG_HOME=/tmp/.config
+export XDG_CACHE_HOME=/tmp/.cache
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+exec "$DIR/bin/katana" "$@"

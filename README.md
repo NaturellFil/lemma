@@ -34,6 +34,33 @@ Lemma is a Python-based AWS Lambda package and client designed to execute packag
 
 While the intented use case for Lemma is to run verbose security security tooling on AWS lambda, Lemma can be used for any type of command-line tool you wish to run remotely.
 
+# Fork: container packaging + full TBHM recon stack
+
+This fork adds **container-image packaging** so the Lambda is no longer bound by the
+250 MB unzipped zip cap — it gets the **10 GB** container limit instead. That makes
+room to bake in the entire Bug Hunter's Methodology (Jhaddix) recon toolchain plus
+nuclei-templates, DNS resolvers, gf-patterns and curated wordlists.
+
+- **Build:** `./build.sh` now asks for *packaging* — choose **container** (default).
+  Tools are built/baked at image build time, not stuffed into a zip. The host docker
+  socket is mounted into the build container so `sam build` can build the image.
+- **What's baked:** subfinder, amass, assetfinder, findomain, github-subdomains,
+  tlsx, asnmap, mapcidr, cdncheck, puredns, shuffledns, massdns, dnsx, alterx,
+  dnsgen, httpx, httprobe, naabu (connect scan), katana, gau, waybackurls,
+  hakrawler, gospider, subjs, ffuf, feroxbuster, arjun, paramspider, gf (+patterns),
+  qsreplace, nuclei (+templates), dalfox, smuggler, anew, unfurl, uro,
+  interactsh-client — plus `getwl` for pulling big assetnote/SecLists wordlists.
+- **How to run the methodology:** see **[RECON.md](RECON.md)** for a phase-by-phase
+  playbook and fan-out patterns.
+- **Notes / limits:** 15-min timeout (chunk via `-p`/`-d` fan-out), unprivileged
+  (connect-scan only, no SYN/masscan), read-only FS except `/tmp` (sized via
+  `EphemeralStorage`), no screenshots (chromium not bundled). The legacy **zip**
+  packaging is still selectable in `build.sh`.
+
+Implementation: `Dockerfile.lambda` (multi-stage: Go ecosystem via `go install` +
+massdns compile, then assembled in a python-slim Lambda image with the Web Adapter),
+`tools/install_tools_container.sh`, `templates/template_*_container.yaml`.
+
 # Demo
 
 Web-CLI:

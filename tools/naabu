@@ -1,0 +1,19 @@
+#!/bin/bash
+# naabu — port scanner. AWS Lambda runs unprivileged (no CAP_NET_RAW), so SYN
+# scanning is unavailable; default to CONNECT scan unless the caller chose a
+# scan type. Read-only FS => HOME/state to /tmp.
+export HOME=/tmp
+export XDG_CONFIG_HOME=/tmp/.config
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+have_st=0
+for a in "$@"; do
+    case "$a" in
+        -s|-scan-type) have_st=1 ;;
+    esac
+done
+
+EXTRA=()
+[ "$have_st" -eq 0 ] && EXTRA+=(-s c)
+
+exec "$DIR/bin/naabu" "${EXTRA[@]}" "$@"

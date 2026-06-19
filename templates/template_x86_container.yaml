@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Lemma Lambda Function (container image, big-tools)
+
+Globals:
+  Function:
+    Timeout: %TIMEOUT%
+
+Resources:
+  LemmaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      MemorySize: %MEMORY%
+      Architectures:
+        - x86_64
+      EphemeralStorage:
+        Size: %EPHEMERAL%
+      Environment:
+        Variables:
+          AWS_LWA_INVOKE_MODE: response_stream
+          LEMMA_API_KEY: %API_KEY%
+          LEMMA_TIMEOUT: %TIMEOUT%
+          HOME: /tmp
+          PORT: 8000
+      FunctionUrlConfig:
+        AuthType: NONE
+        InvokeMode: RESPONSE_STREAM
+    Metadata:
+      DockerTag: lemma-x86
+      DockerContext: .
+      Dockerfile: Dockerfile.lambda
+      DockerBuildArgs:
+        TOOL_ARCH: amd64
+
+Outputs:
+  LemmaFunctionUrl:
+    Description: "Lemma Lambda Function URL"
+    Value: !Sub "LEMMA_URL:${LemmaFunctionUrl.FunctionUrl}"
+  LemmaFunction:
+    Description: "Lemma Lambda Function ARN"
+    Value: !GetAtt LemmaFunction.Arn

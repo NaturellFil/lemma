@@ -1,0 +1,59 @@
+#!/bin/bash
+# getwl <alias|url> — fetch a wordlist into /tmp/wordlists and print its path.
+#
+# Use for big/one-off wordlists you don't want baked into the image. Leverages
+# the Lambda's ephemeral /tmp (sized via EphemeralStorage in the SAM template).
+#
+# CAVEAT: /tmp is per-execution-environment. When Lemma fans a job across many
+# workers (-p/-d/-i) each worker is a different Lambda, so a list fetched here
+# will NOT be present on the others. For fan-out, use a BAKED wordlist
+# (tools/wordlists/*, added in install_tools_container.sh) instead. getwl is for
+# single-invocation interactive use.
+#
+# Example:  ffuf -w "$(getwl raft-large-dirs)" -u https://target/FUZZ
+set -euo pipefail
+mkdir -p /tmp/wordlists
+
+SL=https://raw.githubusercontent.com/danielmiessler/SecLists/master
+AN=https://wordlists-cdn.assetnote.io/data
+declare -A WL=(
+  [common]="$SL/Discovery/Web-Content/common.txt"
+  [raft-large-dirs]="$SL/Discovery/Web-Content/raft-large-directories.txt"
+  [raft-large-files]="$SL/Discovery/Web-Content/raft-large-files.txt"
+  [raft-large-words]="$SL/Discovery/Web-Content/raft-large-words.txt"
+  [dirlist-medium]="$SL/Discovery/Web-Content/directory-list-2.3-medium.txt"
+  [dirlist-big]="$SL/Discovery/Web-Content/directory-list-2.3-big.txt"
+  [api]="$SL/Discovery/Web-Content/api/api-endpoints.txt"
+  [params]="$SL/Discovery/Web-Content/burp-parameter-names.txt"
+  [lfi]="$SL/Fuzzing/LFI/LFI-Jhaddix.txt"
+  [subdomains]="$SL/Discovery/DNS/subdomains-top1million-110000.txt"
+  [subdomains-5k]="$SL/Discovery/DNS/subdomains-top1million-5000.txt"
+  # assetnote CDN (big DNS-brute + content lists used in TBHM)
+  [an-best-dns]="$AN/manual/best-dns-wordlist.txt"
+  [an-2m-subdomains]="$AN/manual/2m-subdomains.txt"
+  [an-httparchive-dirs]="$AN/automated/httparchive_directories_1m_2024_05_28.txt"
+  [an-httparchive-params]="$AN/automated/httparchive_parameters_top_1m_2024_05_28.txt"
+)
+
+if [ "$#" -lt 1 ]; then
+    echo "usage: getwl <alias|url>" >&2
+    echo "aliases: ${!WL[*]}" >&2
+    exit 1
+fi
+
+arg="$1"
+if [[ "$arg" == http* ]]; then
+    url="$arg"
+    out="/tmp/wordlists/$(basename "$arg")"
+elif [[ -n "${WL[$arg]:-}" ]]; then
+    url="${WL[$arg]}"
+    out="/tmp/wordlists/${arg}.txt"
+else
+    echo "unknown alias '$arg'. aliases: ${!WL[*]}" >&2
+    exit 1
+fi
+
+if [ ! -s "$out" ]; then
+    curl -fsSL "$url" -o "$out"
+fi
+echo "$out"

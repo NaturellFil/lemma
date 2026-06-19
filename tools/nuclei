@@ -1,0 +1,26 @@
+#!/bin/bash
+# nuclei scanner. Read-only FS => state/config/cache go to /tmp.
+# Templates are baked read-only into tools/nuclei-templates; we disable the
+# update check (-duc) so nuclei never tries to write to the read-only template
+# dir. If the caller did not pass their own -t/-templates/-w/-workflows we
+# default to the baked template set.
+export HOME=/tmp
+export XDG_CONFIG_HOME=/tmp/.config
+export XDG_CACHE_HOME=/tmp/.cache
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+TEMPLATES="$DIR/nuclei-templates"
+
+have_templates=0
+for a in "$@"; do
+    case "$a" in
+        -t|-templates|-w|-workflows|-tl|-template-list) have_templates=1 ;;
+    esac
+done
+
+EXTRA=()
+if [ "$have_templates" -eq 0 ] && [ -d "$TEMPLATES" ]; then
+    EXTRA=(-templates "$TEMPLATES")
+fi
+
+exec "$DIR/bin/nuclei" -duc "${EXTRA[@]}" "$@"

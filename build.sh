@@ -81,13 +81,43 @@ function lambda_memory() {
     done
 }
 
+function choose_packaging() {
+    local choice
+    while true; do
+        read -p "Choose packaging (container or zip) [default: container]: " choice
+        choice=${choice:-container}
+
+        if [[ "$choice" == "container" || "$choice" == "zip" ]]; then
+            packaging=$choice
+            break
+        else
+            echo "Invalid choice. Please enter 'container' or 'zip'."
+        fi
+    done
+}
+
+function choose_ephemeral() {
+    local choice
+    while true; do
+        read -p "Choose /tmp ephemeral storage (512-10240 MB) [default: 4096]: " choice
+        choice=${choice:-4096}
+
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 512 ] && [ "$choice" -le 10240 ]; then
+            ephemeral=$choice
+            break
+        else
+            echo "Invalid choice. Please enter a number between 512 and 10240."
+        fi
+    done
+}
+
 function install_tools() {
     # ask a Y/N question to the user if they want to install tools, default is Y
     local choice
     while true; do
         read -p "Do you want to install tools into the lambda package? [Y/n]: " choice
         choice=${choice:-Y}
-        
+
         if [[ "$choice" == "Y" || "$choice" == "y" ]]; then
             # run the install tools script
             echo "Installing tools..."
@@ -132,13 +162,19 @@ else
 
     if [ "$1" == "delete" ]; then
         docker run -it --rm -v ~/.aws:/root/.aws -v .:/lambda \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -e DOCKER_DEFAULT_PLATFORM=$DOCKER_DEFAULT_PLATFORM \
         -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN \
         lemma /lambda/build.sh delete
         exit 0
     fi
 
-    # forward AWS credentials to the container in both .aws and environment variables
+    # forward AWS credentials to the container in both .aws and environment variables.
+    # The host docker socket is mounted so `sam build` can build the Lambda
+    # container image against the host docker daemon (container-image packaging).
     docker run -it --rm -v ~/.aws:/root/.aws -v .:/lambda \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -e DOCKER_DEFAULT_PLATFORM=$DOCKER_DEFAULT_PLATFORM \
     -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN \
     lemma /lambda/build.sh
     exit 0
@@ -173,6 +209,8 @@ if [ ! -f template.yaml ]; then
     # replace %REGION% with aws_region
     sed -i "s/%REGION%/$aws_region/g" samconfig.toml
 
+    choose_packaging
+    echo -e "Packaging specified: $packaging\n"
     choose_architecture
     echo -e "Architecture specified: $arch\n"
     lambda_timeout
@@ -183,11 +221,24 @@ if [ ! -f template.yaml ]; then
     # generate a random API key
     api_key=$(openssl rand -hex 8)
 
-    #check if arch is arm64
-    if [ "$arch" == "arm64" ]; then
-        cp ./templates/template_arm64.yaml ./template.yaml
+    if [ "$packaging" == "container" ]; then
+        # container-image packaging (10 GB) — big tools + wordlists baked in
+        choose_ephemeral
+        echo -e "Ephemeral /tmp storage specified: ${ephemeral} MB\n"
+        if [ "$arch" == "arm64" ]; then
+            cp ./templates/template_arm64_container.yaml ./template.yaml
+        else
+            cp ./templates/template_x86_container.yaml ./template.yaml
+        fi
+        # replace %EPHEMERAL% with ephemeral storage size
+        sed -i "s/%EPHEMERAL%/$ephemeral/g" template.yaml
     else
-        cp ./templates/template_x86.yaml ./template.yaml
+        # legacy zip packaging (250 MB unzipped cap)
+        if [ "$arch" == "arm64" ]; then
+            cp ./templates/template_arm64.yaml ./template.yaml
+        else
+            cp ./templates/template_x86.yaml ./template.yaml
+        fi
     fi
 
     # replace %MEMORY% with lambda_memory
@@ -201,7 +252,25 @@ fi
 arch=$(grep -A 1 'Architectures:' template.yaml | awk '/- / {print $2}')
 api_key=$(grep -A 5 'Environment:' template.yaml | grep 'LEMMA_API_KEY:' | awk '{print $2}')
 
-install_tools
+# Detect packaging from the (possibly pre-existing) template.yaml
+if grep -q 'PackageType: Image' template.yaml; then
+    packaging=container
+else
+    packaging=zip
+fi
+
+if [ "$packaging" == "container" ]; then
+    # Tools are baked inside the image at docker-build time, not on the host.
+    # Make the docker build target the chosen Lambda architecture.
+    if [ "$arch" == "arm64" ]; then
+        export DOCKER_DEFAULT_PLATFORM=linux/arm64
+    else
+        export DOCKER_DEFAULT_PLATFORM=linux/amd64
+    fi
+    echo -e "Container packaging: tools are baked into the image (platform ${DOCKER_DEFAULT_PLATFORM}).\n"
+else
+    install_tools
+fi
 
 rm -rf .aws-sam
 

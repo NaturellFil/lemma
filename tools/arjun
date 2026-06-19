@@ -1,0 +1,4 @@
+#!/bin/bash
+# arjun — HTTP parameter discovery (python). Read-only FS => HOME to /tmp.
+export HOME=/tmp
+exec arjun "$@"

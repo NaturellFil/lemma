@@ -1,0 +1,6 @@
+#!/bin/bash
+# gf — grep-of-interest. Patterns are baked into tools/gf-patterns; point GF_PATH
+# at them (also set in the Dockerfile, repeated here for direct invocation).
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+export GF_PATH="${GF_PATH:-$DIR/gf-patterns}"
+exec "$DIR/bin/gf" "$@"

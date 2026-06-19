@@ -1,0 +1,6 @@
+#!/bin/bash
+# paramspider — mine parameters from the Wayback Machine (python).
+# Read-only FS => write output under /tmp.
+export HOME=/tmp
+cd /tmp || exit 1
+exec paramspider "$@"

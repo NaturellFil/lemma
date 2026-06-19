@@ -1,0 +1,4 @@
+#!/bin/bash
+# dnsgen — generate subdomain permutations from a seed list (python).
+export HOME=/tmp
+exec dnsgen "$@"

@@ -1,0 +1,11 @@
+.git
+.aws-sam
+images
+*.log
+__pycache__
+.venv
+lemmacli.egg-info
+app/tools
+app/tool_requirements.txt
+template.yaml
+samconfig.toml

@@ -1,0 +1,21 @@
+#!/bin/bash
+# shuffledns — massdns wrapper for resolve/bruteforce.
+# Read-only FS => HOME/state to /tmp. Defaults massdns path + baked resolvers.
+export HOME=/tmp
+export XDG_CONFIG_HOME=/tmp/.config
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+RES="$DIR/config/resolvers.txt"
+
+have_res=0 have_bin=0
+for a in "$@"; do
+    case "$a" in
+        -r|-resolver) have_res=1 ;;
+        -m|-massdns) have_bin=1 ;;
+    esac
+done
+
+EXTRA=()
+[ "$have_bin" -eq 0 ] && EXTRA+=(-m "$DIR/bin/massdns")
+[ "$have_res" -eq 0 ] && [ -s "$RES" ] && EXTRA+=(-r "$RES")
+
+exec "$DIR/bin/shuffledns" "${EXTRA[@]}" "$@"

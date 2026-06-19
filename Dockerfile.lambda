@@ -1,0 +1,115 @@
+# Lemma Lambda — CONTAINER IMAGE packaging (TBHM big-tools edition).
+#
+# A zip-packaged Lambda is capped at 250 MB unzipped, which cannot hold the full
+# Bug Hunter's Methodology (Jhaddix) recon stack + nuclei-templates + wordlists.
+# A container image gets 10 GB, so we bake the whole recon toolchain in.
+#
+# Build strategy:
+#   stage 1 (gobuild) : `go install` the entire Go tool ecosystem + compile massdns
+#   stage 2 (final)   : python:slim + Lambda Web Adapter; copy go binaries in,
+#                       add Rust/prebuilt tools, python tools, templates,
+#                       resolvers, gf-patterns and wordlists.
+#
+# The AWS Lambda Web Adapter (copied into /opt/extensions) turns the FastAPI
+# response-streaming server into a Lambda handler — no Runtime Interface Client
+# needed; the adapter polls the Lambda Runtime API and proxies to local uvicorn.
+
+# =========================================================================
+# stage 1: build the Go tool ecosystem + massdns
+# =========================================================================
+FROM golang:1.23-bookworm AS gobuild
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git gcc make libpcap-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV GOFLAGS=-buildvcs=false \
+    GOBIN=/go/bin
+
+# Static (CGO-free) tools — PD suite, tomnomnom utils, crawlers, community tools.
+ENV CGO_ENABLED=0
+RUN set -eux; \
+    for mod in \
+        github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest \
+        github.com/projectdiscovery/dnsx/cmd/dnsx@latest \
+        github.com/projectdiscovery/httpx/cmd/httpx@latest \
+        github.com/projectdiscovery/katana/cmd/katana@latest \
+        github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest \
+        github.com/projectdiscovery/tlsx/cmd/tlsx@latest \
+        github.com/projectdiscovery/asnmap/cmd/asnmap@latest \
+        github.com/projectdiscovery/cdncheck/cmd/cdncheck@latest \
+        github.com/projectdiscovery/mapcidr/cmd/mapcidr@latest \
+        github.com/projectdiscovery/alterx/cmd/alterx@latest \
+        github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest \
+        github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest \
+        github.com/tomnomnom/assetfinder@latest \
+        github.com/tomnomnom/anew@latest \
+        github.com/tomnomnom/unfurl@latest \
+        github.com/tomnomnom/qsreplace@latest \
+        github.com/tomnomnom/httprobe@latest \
+        github.com/tomnomnom/waybackurls@latest \
+        github.com/tomnomnom/gf@latest \
+        github.com/hakluke/hakrawler@latest \
+        github.com/jaeles-project/gospider@latest \
+        github.com/lc/subjs@latest \
+        github.com/lc/gau/v2/cmd/gau@latest \
+        github.com/gwen001/github-subdomains@latest \
+        github.com/d3mondev/puredns/v2@latest \
+        github.com/hahwul/dalfox/v2@latest \
+        github.com/ffuf/ffuf/v2@latest \
+    ; do echo ">> go install $mod"; go install -v "$mod"; done
+
+# CGO tools — naabu needs libpcap (connect-scan still links it).
+RUN CGO_ENABLED=1 go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+
+# massdns (C) — required by puredns / shuffledns
+RUN git clone --depth 1 https://github.com/blechschmidt/massdns /tmp/massdns \
+    && make -C /tmp/massdns \
+    && cp /tmp/massdns/bin/massdns /go/bin/massdns
+
+# =========================================================================
+# stage 2: final Lambda image
+# =========================================================================
+FROM public.ecr.aws/docker/library/python:3.12-slim
+
+# Lambda Web Adapter (response streaming bridge)
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1 /lambda-adapter /opt/extensions/lambda-adapter
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl wget unzip git ca-certificates libpcap0.8 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Tool arch: prefer explicit TOOL_ARCH build-arg, fall back to BuildKit TARGETARCH.
+ARG TARGETARCH
+ARG TOOL_ARCH
+ENV TOOL_ARCH=${TOOL_ARCH:-${TARGETARCH:-amd64}}
+
+WORKDIR /var/task
+
+# Go binaries from stage 1 land in a staging dir; the installer distributes them.
+COPY --from=gobuild /go/bin/ /opt/gobin/
+
+# Tool wrappers + installer, then bake everything (binaries distributed, Rust
+# tools + python tools + templates + resolvers + gf-patterns + wordlists added).
+# Also generates tool_requirements.txt at /var/task.
+COPY tools/ /var/task/tools/
+RUN chmod +x /var/task/tools/* 2>/dev/null; \
+    /var/task/tools/install_tools_container.sh "$TOOL_ARCH" /var/task/tools /var/task; \
+    rm -f /var/task/tools/install_tools.sh /var/task/tools/install_tools_container.sh
+
+# Python deps for the FastAPI app (requirements.txt ends with
+# "-r tool_requirements.txt", which now exists).
+COPY app/requirements.txt /var/task/requirements.txt
+RUN pip install --no-cache-dir -r /var/task/requirements.txt
+
+# App code (main.py, static/, run.sh). Does not clobber tools/.
+COPY app/ /var/task/
+
+ENV HOME=/tmp \
+    PORT=8000 \
+    AWS_LWA_INVOKE_MODE=response_stream \
+    GF_PATH=/var/task/tools/gf-patterns \
+    PATH="/var/task/tools/bin:${PATH}"
+
+CMD ["python", "-m", "uvicorn", "--host", "0.0.0.0", "--port", "8000", "main:app"]

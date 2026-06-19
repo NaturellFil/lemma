@@ -1,0 +1,4 @@
+#!/bin/bash
+# uro — declutter/dedupe a list of URLs (python).
+export HOME=/tmp
+exec uro "$@"
